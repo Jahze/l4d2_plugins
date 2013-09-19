@@ -1,0 +1,248 @@
+mov     eax, [ebp+arg_18]
+movss   dword ptr [esp+8], xmm0
+xorps   xmm0, ds:xmmword_B93E50
+mov     dword ptr [esp], offset aCterrorplayerF ; "CTerrorPlayer::FireBullet Spread"
+movss   dword ptr [esp+4], xmm0
+mov     [esp+0Ch], eax
+call    _Z17SharedRandomFloatPKcffi ; SharedRandomFloat(char const*,float,float,int)
+mov     edx, [ebp+arg_18]
+fstp    [ebp+var_AC]
+
+; float spread = SharedRandomFloat("CTerrorPlayer::FireBullet Spread", -xmm0, +xmm0, pelletID);
+
+mov     dword ptr [esp+8], 43340000h
+mov     dword ptr [esp+4], 0
+mov     dword ptr [esp], offset aCterrorplaye_3 ; "CTerrorPlayer::FireBullet SpreadDir"
+mov     [esp+0Ch], edx
+call    _Z17SharedRandomFloatPKcffi ; SharedRandomFloat(char const*,float,float,int)
+fstp    [ebp+var_C4]
+movss   xmm0, [ebp+var_C4]
+addss   xmm0, xmm0
+unpcklps xmm0, xmm0
+cvtps2pd xmm0, xmm0
+mulsd   xmm0, ds:qword_BBFE68
+unpcklpd xmm0, xmm0
+cvtpd2ps xmm0, xmm0
+unpcklps xmm0, xmm0
+cvtps2pd xmm0, xmm0
+
+; // range of 0 -> 360 weighted towards middle
+;
+; double spread_dir = 2.0 * SharedRandomFloat("CTerrorPlayer::FireBullet SpreadDir", 0.0, 180.0, pelletID);
+; spread_dir *= DEGREES_TO_RADIANS;
+
+movsd   [ebp+var_D0], xmm0
+fld     [ebp+var_D0]
+fsincos
+fxch    st(1)
+movss   xmm0, [ebp+var_AC]
+fstp    [ebp+var_B8]
+
+; // ebx = QAngle qangle_arg2
+;
+; double dir_sin = sin(spread_dir)
+
+movsd   xmm3, [ebp+var_B8] 			; xmm3 = dir_sin
+movss   xmm2, dword ptr [ebx] 		; xmm2 = qangle_arg2.z
+mulss   xmm0, [ebp+var_BC] 			; xmm0 = spread * [pelletscatterpitch/pelletscatteryaw or 1.0] /* set above in 3 way condition, 2/3 set to 1.0 */
+cvtpd2ps xmm3, xmm3
+movss   xmm1, dword ptr [ebx+4] 	; xmm1 = qangle_arg2.y
+mov     eax, [ebx+8] 				; eax = qangle_arg2.x
+fstp    [ebp+var_D0]
+
+; double dir_cos = cos(spread_dir);
+
+; spread below is xmm0 so INCLUDES pelletscatter
+mulss   xmm0, xmm3 					; xmm0 = spread * dir_sin
+mov     [ebp+var_3C], eax 			; result.x = qangle_arg2.x
+addss   xmm0, xmm2 					; xmm0 = (spread * dir_sin) + qangle_arg2.z
+movsd   xmm2, [ebp+var_D0] 			; xmm2 = dir_cos
+movss   [ebp+var_44], xmm0 			l result.z = (spread * dir_sin) + qangle_arg2.z
+movapd  xmm0, xmm2
+unpcklpd xmm0, xmm0
+cvtpd2ps xmm0, xmm0
+mulss   xmm0, [ebp+var_AC]			; xmm0 = spread * dir_cos
+addss   xmm0, xmm1					; xmm0 = (spread * dir_cos) + qangle_arg2.y
+movss   [ebp+var_40], xmm0 			; result.y = (spread * dir_cos) + qangle_arg2.y
+
+; QAngle result = 
+
+if spread is 0 then the whole spreading algorithm is skipped
+spread is some offset of CTerrorWeaponInfo::GetWeaponInfo (pelletscatteryaw)
+
+---------------
+
+windows
+
+start of function:
+.text:103B3930
+
+target instruction:
+.text:103B3C90 E8 FB 42 E5 FF                          call    sub_10207F90
+.text:103B3C95 D9 5D A0                                fstp    [ebp+var_60]
+
+offset = 0x360 // 864
+signature = 55 8b ec 81 ec ?? ?? ?? ?? 8b 45 18 57 8b f9
+
+patch to
+d9 ee		fldz
+0f 1f 00 	nop
+
+
+-------------------
+
+linux
+
+start of function:
+.text:004F8410                 push    ebp
+
+target instruction:
+.text:004F87A7 E8 54 0D 05 00                          call    _Z17SharedRandomFloatPKcffi
+.text:004F87AC 8B 55 20                                mov     edx, [ebp+arg_18]
+.text:004F87AF D9 9D 54 FF FF FF                       fstp    [ebp+var_AC]
+
+offset = 0x397 // 919
+signature = @_ZN13CTerrorPlayer10FireBulletE6VectorRK6QAngle10CSWeaponIDi
+
+patch to
+d9 ee		fldz
+0f 1f 00 	nop
+
+
+-------------------
+
+
+real patch:
+
+; ring1 = (i-1) * (360 / max(3, max_bullets-1)
+mov ring1, max_bullets
+sub ring1, 1
+cmp ring1, 3
+cmovg ring1, 3
+fld 360.0f
+fild ring1
+fdivp
+mov b, i
+sub b, 1
+fild b
+fmulp
+fstp ring1
+
+; ring2 = (i-4) * (360 / max(7, max_bullets-4)
+mov ring2, max_bullets
+sub ring1, 4
+cmp ring1, 7
+cmovg ring2, 7
+fld 360.0f
+fild ring2
+fdivp
+mov b, i
+sub b, 4
+fild b
+fmulp
+fstp ring2
+
+; spread = 0.0f
+
+mov spread, 0.0f
+
+; if (bullet > 4)
+;	spread = 5.0f
+; 	spread_dir = ring2
+
+cmp bullet, 4
+cmovg spread, 5.0f
+cmovg spread_dir, ring2
+
+; if (bullet > 0)
+;	spread = 3.0f
+; 	spread_dir = ring1
+
+cmp bullet, 0
+cmovg spread, 3.0f
+cmovg spread_dir, ring1
+
+-------------------------------------------------
+
+windows
+
+area to patch:
+.text:103B3C73 83 EC 08                sub     esp, 8
+.text:103B3C76 0F 28 C8                movaps  xmm1, xmm0
+.text:103B3C79 0F 57 05 10 39 5C 10    xorps   xmm0, ds:xmmword_105C3910
+.text:103B3C80 F3 0F 11 4C 24 04       movss   [esp+0B4h+var_B0], xmm1
+.text:103B3C86 F3 0F 11 04 24          movss   [esp+0B4h+var_B4], xmm0
+.text:103B3C8B 68 EC 59 6A 10          push    offset aCterrorplayerF ; "CTerrorPlayer::FireBullet Spread"
+.text:103B3C90 E8 FB 42 E5 FF          call    sub_10207F90
+.text:103B3C95 D9 5D A0                fstp    [ebp+var_60] <----- store spread here
+.text:103B3C98 F3 0F 10 05 FC 61 5C 10 movss   xmm0, ds:dword_105C61FC
+.text:103B3CA0 83 C4 10                add     esp, 10h
+.text:103B3CA3 56                      push    esi
+.text:103B3CA4 83 EC 08                sub     esp, 8
+.text:103B3CA7 F3 0F 11 44 24 04       movss   [esp+0B4h+var_B0], xmm0
+.text:103B3CAD 0F 57 C0                xorps   xmm0, xmm0
+.text:103B3CB0 F3 0F 11 04 24          movss   [esp+0B4h+var_B4], xmm0
+.text:103B3CB5 68 C8 59 6A 10          push    offset aCterrorplaye_3 ; "CTerrorPlayer::FireBullet SpreadDir"
+.text:103B3CBA E8 D1 42 E5 FF          call    sub_10207F90 <---- store spread_dir on top of fpu stack
+.text:103B3CBF DC C0                   fadd    st, st
+
+0x4e bytes = 78
+
+i = esi - [ebp+arg_14] - 1
+max_bullets = edi + esi - [ebp+arg_14]
+ring1 = esp
+ring2 = esp+4
+b = esp+8
+
+eax, edx, ecx(?) look safe to use
+NEED TO sub esp, c before end
+
+new offset = 0x343 // 835
+
+------------------------------------------------------------
+
+windows
+
+the instruction that controls the circle shape is:
+
+.text:103B3930 [start]
+.text:103B3D0E F3 0F 59 5D 18  mulss   xmm3, [ebp+arg_10]
+
+offset is 0x3DE // 990
+
+replace with 5 byte nop
+0F 1F 44 00 00
+
+------------------------------------------------------------
+
+linux
+
+.text:004F8410: [function start]
+
+.text:004F8786 8B 45 20                 mov     eax, [ebp+arg_18]
+.text:004F8789 F3 0F 11 44 24 08        movss   dword ptr [esp+8], xmm0
+.text:004F878F 0F 57 05 50 3E B9 00     xorps   xmm0, ds:xmmword_B93E50
+.text:004F8796 C7 04 24 50 FC BB 00     mov     dword ptr [esp], offset aCterrorplayerF ; "CTerrorPlayer::FireBullet Spread"
+.text:004F879D F3 0F 11 44 24 04        movss   dword ptr [esp+4], xmm0
+.text:004F87A3 89 44 24 0C              mov     [esp+0Ch], eax
+.text:004F87A7 E8 54 0D 05 00           call    _Z17SharedRandomFloatPKcffi ; SharedRandomFloat(char const*,float,float,int)
+.text:004F87AC 8B 55 20                 mov     edx, [ebp+arg_18]
+.text:004F87AF D9 9D 54 FF FF FF        fstp    [ebp+var_AC]
+.text:004F87B5 C7 44 24 08 00 00 34 43  mov     dword ptr [esp+8], 43340000h
+.text:004F87BD C7 44 24 04 00 00 00 00  mov     dword ptr [esp+4], 0
+.text:004F87C5 C7 04 24 74 FC BB 00     mov     dword ptr [esp], offset aCterrorplaye_3 ; "CTerrorPlayer::FireBullet SpreadDir"
+.text:004F87CC 89 54 24 0C              mov     [esp+0Ch], edx
+.text:004F87D0 E8 2B 0D 05 00           call    _Z17SharedRandomFloatPKcffi ; SharedRandomFloat(char const*,float,float,int)
+.text:004F87D5 D9 9D 3C FF FF FF        fstp    [ebp+var_C4]
+
+0x55 bytes // 85
+
+NEW OFFSET = 0x376 // 886
+
+
+spread = ebp+var_AC
+spread_dir = ebp+var_C4
+i = ebp+arg_18 - 1
+max_bullets = ebp+arg_18 + edi - 1 (?)
+
+0xaec597c6
